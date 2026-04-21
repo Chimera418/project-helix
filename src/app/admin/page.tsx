@@ -161,6 +161,8 @@ function TeamCard({
   onResetHints,
   onSkip,
   onDelete,
+  onResetUndos,
+  onResetWordle,
 }: {
   t: Team;
   timerDuration: number;

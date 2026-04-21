@@ -34,8 +34,8 @@ export default function Round1() {
         const shuffledItems = [...items].sort(() => 0.5 - Math.random());
         return {
           ...q,
-          statements: shuffledItems.map(it => it.stmt),
-          explanations: shuffledItems.map(it => it.exp),
+          statements: shuffledItems.map(it => it.stmt) as [string, string, string],
+          explanations: shuffledItems.map(it => it.exp) as [string, string, string],
           correctIndex: shuffledItems.findIndex(it => it.stmt === q.statements[q.correctIndex])
         };
       });
