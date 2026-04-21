@@ -98,10 +98,17 @@ export default function Round3() {
           greens[i] = letter;
         } else if (stat === 'present') {
           if (!yellows[letter]) yellows[letter] = [];
-          yellows[letter].push(i);
+          if (!yellows[letter].includes(i)) yellows[letter].push(i);
         } else if (stat === 'absent') {
-          // Add to grays only if not green/yellow elsewhere
-          if (!history.some(prev => prev.word.includes(letter) && (prev.statuses[prev.word.indexOf(letter)] === 'correct' || prev.statuses[prev.word.indexOf(letter)] === 'present'))) {
+          // FIX: Use per-position check across ALL guesses (not indexOf which only finds
+          // the first occurrence). If this letter ever appears as correct/present at ANY
+          // position in ANY previous guess, it must NOT go into grays.
+          const everGreenOrYellow = history.some(prev =>
+            prev.word.split('').some((ch, idx) =>
+              ch === letter && (prev.statuses[idx] === 'correct' || prev.statuses[idx] === 'present')
+            )
+          );
+          if (!everGreenOrYellow) {
             grays.add(letter);
           }
         }
@@ -116,33 +123,40 @@ export default function Round3() {
   // Validate a potential word against constraints
   const isValidUnderConstraints = (word: string, c: Constraints): string | true => {
     const chars = word.split('');
-    
-    // Check Greens
+
+    // Check Greens: required letters at specific positions
     for (let i = 0; i < 5; i++) {
-        if (c.greens[i] && chars[i] !== c.greens[i]) {
-            return `Must use '${c.greens[i].toUpperCase()}' at position ${i + 1}`;
-        }
+      if (c.greens[i] && chars[i] !== c.greens[i]) {
+        return `Must use '${c.greens[i].toUpperCase()}' at position ${i + 1}`;
+      }
     }
 
-    // Check Grays
-    for (const char of chars) {
-        if (c.grays.has(char)) {
-            // Note: edge case where a word has 2 of a letter, one gray one green/yellow is tricky, 
-            // but we simplified gray logic
-            return `Cannot use '${char.toUpperCase()}'`;
-        }
+    // Check Grays: these letters should not appear in the word at all.
+    // FIX: Skip the check if the character is at a confirmed green position —
+    // duplicate-letter words can have the same letter both absent (in one spot)
+    // and correct (in another), so placing it at the green spot is always valid.
+    for (let i = 0; i < chars.length; i++) {
+      const char = chars[i];
+      if (c.grays.has(char) && c.greens[i] !== char) {
+        return `Cannot use '${char.toUpperCase()}'`;
+      }
     }
 
-    // Check Yellows
+    // Check Yellows: the letter must appear in at least ONE valid (non-forbidden) position.
+    // FIX: Don't reject a word just because the letter is ALSO at an invalid position —
+    // what matters is that it appears somewhere valid too (covers words like VILLI where
+    // 'I' might be at both a yellow-forbidden position AND a perfectly valid one).
     for (const [yLetter, invalidIndices] of Object.entries(c.yellows)) {
-        if (!word.includes(yLetter)) {
-            return `Must contain '${yLetter.toUpperCase()}'`;
+      const hasValidPlacement = chars.some((ch, i) =>
+        ch === yLetter && !invalidIndices.includes(i)
+      );
+      if (!hasValidPlacement) {
+        if (!chars.includes(yLetter)) {
+          return `Must contain '${yLetter.toUpperCase()}'`;
+        } else {
+          return `'${yLetter.toUpperCase()}' must appear outside position${invalidIndices.length > 1 ? 's' : ''} ${invalidIndices.map(i => i + 1).join(', ')}`;
         }
-        for (let i = 0; i < 5; i++) {
-            if (chars[i] === yLetter && invalidIndices.includes(i)) {
-                return `'${yLetter.toUpperCase()}' cannot be at position ${i + 1}`;
-            }
-        }
+      }
     }
 
     return true;
