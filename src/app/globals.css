@@ -1,26 +1,57 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
-@theme inline {
+@theme {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  
+  --color-neon-green: #39ff14;
+  --color-neon-cyan: #00ffff;
+  --color-neon-purple: #9d00ff;
+  --color-neon-red: #ff003c;
+  --color-glass-bg: rgba(17, 24, 39, 0.6);
+  --color-glass-border: rgba(255, 255, 255, 0.1);
+  --color-glass-highlight: rgba(255, 255, 255, 0.05);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root {
+  --background: #030014;
+  --foreground: #f0f0f0;
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), sans-serif;
+  background-image: 
+    radial-gradient(circle at 15% 50%, rgba(0, 255, 255, 0.05), transparent 25%),
+    radial-gradient(circle at 85% 30%, rgba(157, 0, 255, 0.05), transparent 25%);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+/* Glassmorphic Utilities */
+@utility glass {
+  background: var(--color-glass-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--color-glass-border);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+@utility neon-text-green {
+  color: var(--color-neon-green);
+  text-shadow: 0 0 5px var(--color-neon-green), 0 0 20px var(--color-neon-green);
+}
+
+@utility neon-text-cyan {
+  color: var(--color-neon-cyan);
+  text-shadow: 0 0 5px var(--color-neon-cyan), 0 0 20px var(--color-neon-cyan);
+}
+
+@utility neon-border-cyan {
+  border-color: var(--color-neon-cyan);
+  box-shadow: 0 0 5px var(--color-neon-cyan), inset 0 0 5px var(--color-neon-cyan);
 }
