@@ -39,37 +39,53 @@ export default function Round3() {
   const [undos, setUndos] = useState(3);
   const [wordListVisible, setWordListVisible] = useState(false);
   const [wordSearch, setWordSearch] = useState('');
+  const [isSyncing, setIsSyncing] = useState(true);
 
-  // Single init: restore or pick target word
+  // Safety timer: Wait for HUD to patch the store from Supabase
   useEffect(() => {
-    if (!team) {
-      router.replace('/');
-      return;
-    }
-    // If this team already has a persisted wordle target, restore it.
-    // This prevents the word from changing on every refresh.
-    // 1. Restore from state_payload (best for current session guesses)
-    const savedPayload = (team.state_payload?.targetWord as string | undefined);
-    // 2. Fallback to current_target (best if returning to a round in progress)
-    const savedTarget = team.current_target;
-
-    const saved = savedPayload || (savedTarget?.length === 5 ? savedTarget : null);
-
-    if (saved && saved.length === 5) {
-      setTargetWord(saved.toUpperCase());
-      const savedGuesses = team.state_payload?.guesses;
-      if (Array.isArray(savedGuesses) && savedGuesses.length > 0) {
-        setGuesses(savedGuesses);
-      }
-      return;
-    }
-    // First time on this round: pick a random target that is NEVER the cipher word
-    const cipherWord = team.cipher_word?.toUpperCase() ?? '';
-    const pool = VALID_WORDS.filter(w => w.toUpperCase() !== cipherWord);
-    setTargetWord(pool[Math.floor(Math.random() * pool.length)].toUpperCase());
+    const timer = setTimeout(() => setIsSyncing(false), 800);
+    return () => clearTimeout(timer);
   }, []);
 
-  // Combined sync: always writes current_round: 3 + target + payload in one atomic update
+  // Combined Reactivity: sync DB -> Local
+  useEffect(() => {
+    if (!team) return;
+
+    const p = team.state_payload;
+    const dbTarget = p?.targetWord?.toUpperCase() || (team.current_target?.length === 5 ? team.current_target : null);
+
+    // Case 1: Initialization from DB (Highest Priority)
+    // If we have NO local targetWord, but the DB has one, USE IT.
+    if (!targetWord && dbTarget) {
+      setTargetWord(dbTarget.toUpperCase());
+      setGuesses(p?.guesses || []);
+      setUndos(p?.undos ?? 3);
+      return;
+    } 
+    
+    // Case 2: New Game Generation (Only if DB is empty after sync)
+    if (!targetWord && team.current_round === 3 && !isSyncing && !dbTarget) {
+      // Pick a new word only if NOTHING exists in DB after the isSyncing delay
+      const cipherWord = team.cipher_word?.toUpperCase() ?? '';
+      const pool = VALID_WORDS.filter(w => w.toUpperCase() !== cipherWord);
+      const picked = pool[Math.floor(Math.random() * pool.length)].toUpperCase();
+      console.log('Generating new target word safely:', picked);
+      setTargetWord(picked);
+      return;
+    }
+    
+    // Case 3: Admin Explicit Override (Reset Word or Reset Undos)
+    if (targetWord && dbTarget && dbTarget.toUpperCase() !== targetWord.toUpperCase()) {
+      setTargetWord(dbTarget.toUpperCase());
+      setGuesses(p?.guesses || []);
+      setUndos(p?.undos ?? 3);
+    } 
+    else if (p?.undos !== undefined && p.undos !== undos) {
+      setUndos(p.undos);
+    }
+  }, [team?.state_payload, team?.current_target, team?.current_round, targetWord, undos, isSyncing]);
+
+  // Combined continuous sync: Local -> DB
   useEffect(() => {
     if (!team || !targetWord) return;
 
@@ -88,24 +104,6 @@ export default function Round3() {
       });
     }
   }, [targetWord, guesses, undos]);
-
-  // Reactivity to Admin resets
-  useEffect(() => {
-    if (!team?.state_payload) return;
-    const p = team.state_payload;
-    const dbTarget = p.targetWord?.toUpperCase();
-    
-    // If the DB word changed (Admin reset), we MUST update local state
-    if (dbTarget && dbTarget !== targetWord) {
-      setTargetWord(dbTarget);
-      setGuesses(p.guesses || []);
-      setUndos(p.undos ?? 3);
-    } 
-    // If undos were reset by admin
-    else if (p.undos !== undos) {
-      setUndos(p.undos ?? 3);
-    }
-  }, [team?.state_payload]);
 
   // Build constraints from all existing guesses
   const getConstraints = (history: Guess[]): Constraints => {
@@ -195,8 +193,8 @@ export default function Round3() {
   // Evaluate a guess against the target word
   const evaluateGuess = (word: string, target: string): LetterStatus[] => {
     const statuses: LetterStatus[] = Array(5).fill('absent');
-    const targetChars = target.split('');
-    const wordChars = word.split('');
+    const targetChars = target.toLowerCase().split('');
+    const wordChars = word.toLowerCase().split('');
 
     // Greens pass
     wordChars.forEach((ch, i) => {
@@ -260,7 +258,7 @@ export default function Round3() {
     setGuesses(newGuesses);
     setCurrentGuess('');
 
-    if (currentGuess === targetWord) {
+    if (currentGuess.toUpperCase() === targetWord.toUpperCase()) {
       setGameState('lost'); // They guessed the word, they lose!
     } else if (newGuesses.length >= REQUIRED_SURVIVALS) {
       setGameState('won'); // They survived
@@ -339,7 +337,21 @@ export default function Round3() {
     );
   };
 
-  if (!targetWord) return null;
+  if (!targetWord || isSyncing) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] gap-6 w-full">
+        <motion.div 
+          animate={{ rotate: 360 }} 
+          transition={{ repeat: Infinity, duration: 1, ease: "linear" }} 
+          className="w-12 h-12 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full shadow-[0_0_15px_rgba(6,182,212,0.3)]" 
+        />
+        <div className="flex flex-col items-center gap-2">
+          <p className="text-cyan-500/50 font-mono text-xs uppercase tracking-[0.3em] animate-pulse">Initializing Round 3</p>
+          <p className="text-[10px] text-gray-600 uppercase tracking-widest font-mono">Verifying Encryption Layers...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-center w-full max-w-4xl mx-auto mt-8 relative">

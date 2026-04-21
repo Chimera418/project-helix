@@ -82,6 +82,8 @@ export function subscribeToTeamUpdates(teamId: string): () => void {
           keys_unlocked: updated.keys_unlocked,
           hints_used: updated.hints_used,
           round_hints_used: updated.round_hints_used,
+          current_target: updated.current_target,
+          state_payload: updated.state_payload,
         });
       }
     )
