@@ -33,6 +33,7 @@ export default function HUD() {
             end_time: data.end_time,
             current_target: data.current_target,
             cipher_word: data.cipher_word,
+            state_payload: data.state_payload,
           });
         }
       });

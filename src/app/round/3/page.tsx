@@ -48,10 +48,15 @@ export default function Round3() {
     }
     // If this team already has a persisted wordle target, restore it.
     // This prevents the word from changing on every refresh.
-    const saved = (team.state_payload?.targetWord as string | undefined);
+    // 1. Restore from state_payload (best for current session guesses)
+    const savedPayload = (team.state_payload?.targetWord as string | undefined);
+    // 2. Fallback to current_target (best if returning to a round in progress)
+    const savedTarget = team.current_target;
+
+    const saved = savedPayload || (savedTarget?.length === 5 ? savedTarget : null);
+
     if (saved && saved.length === 5) {
       setTargetWord(saved.toUpperCase());
-      // Also restore their guesses so progress isn't lost
       const savedGuesses = team.state_payload?.guesses;
       if (Array.isArray(savedGuesses) && savedGuesses.length > 0) {
         setGuesses(savedGuesses);
@@ -65,7 +70,6 @@ export default function Round3() {
   }, []);
 
   // Combined sync: always writes current_round: 3 + target + payload in one atomic update
-  // Uses targetWord as the primary trigger so it only runs once target is known
   useEffect(() => {
     if (!team || !targetWord) return;
 
@@ -84,6 +88,24 @@ export default function Round3() {
       });
     }
   }, [targetWord, guesses, undos]);
+
+  // Reactivity to Admin resets
+  useEffect(() => {
+    if (!team?.state_payload) return;
+    const p = team.state_payload;
+    const dbTarget = p.targetWord?.toUpperCase();
+    
+    // If the DB word changed (Admin reset), we MUST update local state
+    if (dbTarget && dbTarget !== targetWord) {
+      setTargetWord(dbTarget);
+      setGuesses(p.guesses || []);
+      setUndos(p.undos ?? 3);
+    } 
+    // If undos were reset by admin
+    else if (p.undos !== undos) {
+      setUndos(p.undos ?? 3);
+    }
+  }, [team?.state_payload]);
 
   // Build constraints from all existing guesses
   const getConstraints = (history: Guess[]): Constraints => {
@@ -137,8 +159,16 @@ export default function Round3() {
     // and correct (in another), so placing it at the green spot is always valid.
     for (let i = 0; i < chars.length; i++) {
       const char = chars[i];
-      if (c.grays.has(char) && c.greens[i] !== char) {
-        return `Cannot use '${char.toUpperCase()}'`;
+      // Only reject if it's in grays AND NOT a confirmed green or yellow letter elsewhere.
+      // Standard Wordle rules for Hard Mode: You just can't use "absent" letters unless
+      // they are part of a duplicate situation.
+      if (c.grays.has(char)) {
+        // If the letter is marked "gray" but is actually a Green at some OTHER spot,
+        // (common in multi-letter words), we allow it.
+        const isActuallyNeeded = Object.values(c.greens).includes(char) || Object.keys(c.yellows).includes(char);
+        if (!isActuallyNeeded) {
+          return `Cannot use '${char.toUpperCase()}'`;
+        }
       }
     }
 

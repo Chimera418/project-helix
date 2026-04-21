@@ -5,12 +5,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ShieldAlert, Users, Trophy, Timer, Key, SkipForward,
   Minus, Plus, RotateCcw, Eye, LogOut, RefreshCw,
-  Zap, AlertTriangle, CheckCircle2, Clock, X
+  Zap, AlertTriangle, CheckCircle2, Clock, X, Trash2
 } from 'lucide-react';
 import { useGameStore } from '@/lib/store';
 import Link from 'next/link';
 import { parseISO, differenceInSeconds } from 'date-fns';
 import { Team, supabase } from '@/lib/supabase';
+import { VALID_WORDS } from '@/data/words';
 
 const ROUND_NAMES: Record<number, { label: string; emoji: string; color: string }> = {
   1: { label: 'Signal Breach',     emoji: '📡', color: 'from-blue-500/20 to-blue-900/10 border-blue-500/30 text-blue-400' },
@@ -159,15 +160,20 @@ function TeamCard({
   onAdjustPenalty,
   onResetHints,
   onSkip,
+  onDelete,
 }: {
   t: Team;
   timerDuration: number;
   onAdjustPenalty: (id: string, cur: number, delta: number) => void;
   onResetHints: (id: string) => void;
   onSkip: (t: Team) => void;
+  onDelete: (id: string) => void;
+  onResetUndos: (id: string, current: Team) => void;
+  onResetWordle: (id: string, current: Team) => void;
 }) {
   const [custom, setCustom] = useState('');
   const [showTimingModal, setShowTimingModal] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const isEscaped = !!t.end_time;
   const roundInfo = ROUND_NAMES[t.current_round] ?? ROUND_NAMES[1];
 
@@ -195,17 +201,41 @@ function TeamCard({
         </div>
 
         <div className="flex flex-col items-end gap-1 shrink-0">
-          {isEscaped ? (
-            <span className="px-3 py-1 rounded-full text-xs font-bold bg-green-500/20 text-green-400 border border-green-500/40 flex items-center gap-1">
-              <CheckCircle2 size={10} /> Escaped
-            </span>
-          ) : (
-            <span className={`px-3 py-1 rounded-full text-xs font-bold border bg-black/30 ${roundInfo.color} flex items-center gap-1`}>
-              Round {t.current_round}
-            </span>
-          )}
-          <span className={`text-xs font-mono mt-1 ${t.penalty_minutes > 0 ? 'text-red-400' : 'text-gray-600'}`}>
-            {t.penalty_minutes > 0 ? `+${t.penalty_minutes}m penalty` : 'No penalty'}
+          <div className="flex items-center gap-2">
+            {confirmDelete ? (
+              <div className="flex items-center gap-1 bg-red-500/20 px-2 py-1 rounded-lg border border-red-500/30">
+                <button
+                  onClick={() => onDelete(t.id)}
+                  className="text-[10px] font-bold text-red-400 uppercase tracking-widest hover:text-red-300"
+                >
+                  Confirm
+                </button>
+                <button onClick={() => setConfirmDelete(false)} className="text-gray-500 hover:text-gray-300">
+                  <X size={14} />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="p-1.5 text-gray-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                title="Delete Team"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+            
+            {isEscaped ? (
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-green-500/20 text-green-400 border border-green-500/40 flex items-center gap-1">
+                <CheckCircle2 size={10} /> Escaped
+              </span>
+            ) : (
+              <span className={`px-3 py-1 rounded-full text-xs font-bold border bg-black/30 ${roundInfo.color} flex items-center gap-1`}>
+                Round {t.current_round}
+              </span>
+            )}
+          </div>
+          <span className={`text-xs font-mono mt-1 ${t.penalty_minutes > 0 ? 'text-red-400' : t.penalty_minutes < 0 ? 'text-green-400' : 'text-gray-600'}`}>
+            {t.penalty_minutes > 0 ? `+${t.penalty_minutes}m penalty` : t.penalty_minutes < 0 ? `${t.penalty_minutes}m bonus` : 'No penalty/bonus'}
           </span>
         </div>
       </div>
@@ -230,15 +260,31 @@ function TeamCard({
         </span>
       </div>
 
-      {/* Current target */}
-      {t.current_target && (
-        <div className="px-5 py-2.5 bg-black/30 border-b border-white/5 flex items-center justify-between gap-3">
-          <span className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Active Target</span>
-          <span className="font-mono text-sm text-white bg-black/40 px-3 py-0.5 rounded border border-white/10 truncate max-w-[60%]" title={t.current_target}>
-            {t.current_target}
+      {/* Answers Display */}
+      <div className="bg-black/30 border-b border-white/5 divide-y divide-white/5">
+        {/* Master Answer (Always visible) */}
+        <div className="px-5 py-2 flex items-center justify-between gap-3">
+          <span className="text-[9px] uppercase tracking-widest text-cyan-500/60 font-bold">Master Answer</span>
+          <span className="font-mono text-xs text-cyan-200/80 bg-cyan-900/10 px-2.5 py-0.5 rounded border border-cyan-500/10 truncate max-w-[60%]" title="This is the final cipher word for the team">
+            {t.cipher_word || '—'}
           </span>
         </div>
-      )}
+
+        {/* Current Round Target */}
+        {t.current_target && (
+          <div className="px-5 py-2 flex items-center justify-between gap-3 bg-red-500/5">
+            <span className="text-[9px] uppercase tracking-widest text-red-400/60 font-bold">
+              {t.current_round === 3 ? 'R3: Lethal Word' : 
+               t.current_round === 2 ? 'R2: Target Char' : 
+               t.current_round === 4 ? 'R4: Password' : 
+               t.current_round === 5 ? 'R5: Escape Code' : 'Round Target'}
+            </span>
+            <span className="font-mono text-xs text-red-200/80 bg-red-900/10 px-2.5 py-0.5 rounded border border-red-500/10 truncate max-w-[60%]" title="The specific goal for the current round">
+              {t.current_target}
+            </span>
+          </div>
+        )}
+      </div>
 
       {/* Round description */}
       {!isEscaped && (
@@ -251,25 +297,38 @@ function TeamCard({
 
       {/* Actions */}
       <div className="px-5 py-4 flex flex-col gap-3">
-        {/* Penalty row */}
         <div>
-          <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-2 font-bold">Penalty Control</p>
+          <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-2 font-bold">Time Adjustments (Add/Remove from clock)</p>
           <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => onAdjustPenalty(t.id, t.penalty_minutes, -1)}
-              className="flex items-center gap-1 px-3 py-1.5 bg-green-500/10 hover:bg-green-500/25 border border-green-500/30 text-green-400 rounded-lg text-xs font-bold transition-colors"
-              title="Remove 1 minute penalty"
+              onClick={() => onAdjustPenalty(t.id, t.penalty_minutes, -5)}
+              className="px-2 py-1.5 bg-green-500/10 hover:bg-green-500/25 border border-green-500/30 text-green-400 rounded-lg text-[10px] font-bold transition-colors"
+              title="Add 5 mins to clock"
             >
-              <Minus size={11} /> 1m
+              +5m
             </button>
             <button
-              onClick={() => onAdjustPenalty(t.id, t.penalty_minutes, 3)}
-              className="flex items-center gap-1 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/25 border border-red-500/30 text-red-400 rounded-lg text-xs font-bold transition-colors"
-              title="Add 3 minute penalty"
+              onClick={() => onAdjustPenalty(t.id, t.penalty_minutes, -1)}
+              className="px-2 py-1.5 bg-green-500/10 hover:bg-green-500/25 border border-green-500/30 text-green-400 rounded-lg text-[10px] font-bold transition-colors"
+              title="Add 1 min to clock"
             >
-              <Plus size={11} /> 3m
+              +1m
             </button>
-            <div className="flex items-center gap-1 bg-black/40 border border-white/10 rounded-lg px-2 py-1">
+            <button
+              onClick={() => onAdjustPenalty(t.id, t.penalty_minutes, 1)}
+              className="px-2 py-1.5 bg-red-500/10 hover:bg-red-500/25 border border-red-500/30 text-red-400 rounded-lg text-[10px] font-bold transition-colors"
+              title="Penalty: -1 min from clock"
+            >
+              -1m
+            </button>
+            <button
+              onClick={() => onAdjustPenalty(t.id, t.penalty_minutes, 5)}
+              className="px-2 py-1.5 bg-red-500/10 hover:bg-red-500/25 border border-red-500/30 text-red-400 rounded-lg text-[10px] font-bold transition-colors"
+              title="Penalty: -5 mins from clock"
+            >
+              -5m
+            </button>
+            <div className="flex items-center gap-1 bg-black/40 border border-white/10 rounded-lg px-2 py-1 h-[32px]">
               <input
                 type="number"
                 placeholder="±min"
@@ -281,6 +340,9 @@ function TeamCard({
                 onClick={() => {
                   const val = parseInt(custom, 10);
                   if (!isNaN(val) && val !== 0) {
+                    // Logic: User wants to "Add Time", so we subtract from penalty
+                    // But usually in admin inputs, + means penalty and - means subtract.
+                    // Let's stick to Delta: positive = penalty, negative = bonus
                     onAdjustPenalty(t.id, t.penalty_minutes, val);
                     setCustom('');
                   }
@@ -308,6 +370,30 @@ function TeamCard({
           >
             <RotateCcw size={11} /> Reset Hints
           </button>
+          
+          {/* Reset Undos (Only relevant for Round 3) */}
+          {t.current_round === 3 && (
+            <>
+              <button
+                onClick={() => onResetUndos(t.id, t)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500/10 hover:bg-green-500/25 border border-green-500/30 text-green-400 rounded-lg text-xs font-bold transition-colors"
+                title="Give team 3 undos back"
+              >
+                <RefreshCw size={11} /> Reset Undos
+              </button>
+              <button
+                onClick={() => {
+                  if (confirm('Reset Wordle? This clears ALL guesses and picks a new word.')) {
+                    onResetWordle(t.id, t);
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/25 border border-red-500/30 text-red-400 rounded-lg text-xs font-bold transition-colors"
+                title="Pick a new word and clear board"
+              >
+                <RotateCcw size={11} /> Reset Word
+              </button>
+            </>
+          )}
           {!isEscaped && t.current_round < 5 && (
             <button
               onClick={() => onSkip(t)}
@@ -379,10 +465,30 @@ export default function AdminDashboard() {
   };
 
   const adjustPenalty = async (id: string, cur: number, delta: number) => {
-    await supabase.from('teams').update({ penalty_minutes: Math.max(0, cur + delta) }).eq('id', id);
+    // Delta strategy: positive adds penalty (removes time), negative adds bonus (adds time)
+    // We remove the Math.max(0) to allow total bonus time beyond duration
+    await supabase.from('teams').update({ penalty_minutes: cur + delta }).eq('id', id);
+  };
+  const deleteTeam = async (id: string) => {
+    await supabase.from('teams').delete().eq('id', id);
   };
   const resetHints = async (id: string) => {
     await supabase.from('teams').update({ hints_used: 0, round_hints_used: 0 }).eq('id', id);
+  };
+  const resetUndos = async (id: string, t: Team) => {
+    const payload = { ...(t.state_payload || {}), undos: 3 };
+    await supabase.from('teams').update({ state_payload: payload }).eq('id', id);
+  };
+  const resetWordle = async (id: string, t: Team) => {
+    const cipherWord = t.cipher_word?.toUpperCase() ?? '';
+    const pool = VALID_WORDS.filter(w => w.toUpperCase() !== cipherWord);
+    const newWord = pool[Math.floor(Math.random() * pool.length)].toUpperCase();
+    const payload = { guesses: [], undos: 3, targetWord: newWord };
+    await supabase.from('teams').update({
+      state_payload: payload,
+      current_target: newWord,
+      round_hints_used: 0
+    }).eq('id', id);
   };
   const skipRound = async (t: Team) => {
     if (t.current_round >= 5) return;
@@ -511,6 +617,9 @@ export default function AdminDashboard() {
                 onAdjustPenalty={adjustPenalty}
                 onResetHints={resetHints}
                 onSkip={skipRound}
+                onDelete={deleteTeam}
+                onResetUndos={resetUndos}
+                onResetWordle={resetWordle}
               />
             ))}
           </div>
@@ -532,6 +641,9 @@ export default function AdminDashboard() {
                 onAdjustPenalty={adjustPenalty}
                 onResetHints={resetHints}
                 onSkip={skipRound}
+                onDelete={deleteTeam}
+                onResetUndos={resetUndos}
+                onResetWordle={resetWordle}
               />
             ))}
           </div>

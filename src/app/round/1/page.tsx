@@ -27,8 +27,18 @@ export default function Round1() {
       router.replace('/');
       return;
     }
-    // Shuffle and pick 5 questions for this run
-    const shuffled = [...myths].sort(() => 0.5 - Math.random()).slice(0, 5);
+    // Shuffle questions and also shuffle the statements WITHIN each question
+    const shuffled = [...myths].sort(() => 0.5 - Math.random()).slice(0, 5)
+      .map(q => {
+        const items = q.statements.map((stmt, i) => ({ stmt, exp: q.explanations[i] }));
+        const shuffledItems = [...items].sort(() => 0.5 - Math.random());
+        return {
+          ...q,
+          statements: shuffledItems.map(it => it.stmt),
+          explanations: shuffledItems.map(it => it.exp),
+          correctIndex: shuffledItems.findIndex(it => it.stmt === q.statements[q.correctIndex])
+        };
+      });
     setQuestions(shuffled);
     
     setTeam({ ...team, current_round: 1 });

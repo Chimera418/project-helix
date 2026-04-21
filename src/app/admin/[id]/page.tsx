@@ -5,7 +5,7 @@ import { supabase, Team } from '@/lib/supabase';
 import {
   ShieldCheck, ShieldAlert, Key, Timer, ArrowLeft, BrainCircuit,
   Eye, SkipForward, Minus, Plus, RotateCcw, Zap, User,
-  Radio, Search, Skull, Lock, Rocket, CheckCircle2, XCircle
+  Radio, Search, Skull, Lock, Rocket, CheckCircle2, XCircle, RefreshCw
 } from 'lucide-react';
 import Link from 'next/link';
 import { parseISO, differenceInSeconds } from 'date-fns';
@@ -28,17 +28,36 @@ const getConstraints = (history: WordleGuess[]): Constraints => {
   const grays = new Set<string>();
   history.forEach(g => {
     g.word.split('').forEach((letter, i) => {
-      if (g.statuses[i] === 'correct') greens[i] = letter;
-      else if (g.statuses[i] === 'present') { if (!yellows[letter]) yellows[letter] = []; yellows[letter].push(i); }
-      else if (!history.some(p => p.word.includes(letter) && (p.statuses[p.word.indexOf(letter)] === 'correct' || p.statuses[p.word.indexOf(letter)] === 'present'))) grays.add(letter);
+      const stat = g.statuses[i];
+      if (stat === 'correct') greens[i] = letter;
+      else if (stat === 'present') {
+        if (!yellows[letter]) yellows[letter] = [];
+        if (!yellows[letter].includes(i)) yellows[letter].push(i);
+      } else if (stat === 'absent') {
+        // Standard Wordle fix: Only add to grays if it's never green or yellow elsewhere
+        const everGreenOrYellow = history.some(past => 
+          past.word.split('').some((ch, idx) => 
+            ch === letter && (past.statuses[idx] === 'correct' || past.statuses[idx] === 'present')
+          )
+        );
+        if (!everGreenOrYellow) grays.add(letter);
+      }
     });
   });
   return { greens, yellows, grays };
 };
 const isValidWord = (w: string, c: Constraints) => {
   const ch = w.split('');
+  // Check greens
   for (let i = 0; i < 5; i++) if (c.greens[i] && ch[i] !== c.greens[i]) return false;
-  for (const char of ch) if (c.grays.has(char)) return false;
+  // Check grays (relaxed for duplicates)
+  for (const char of ch) {
+    if (c.grays.has(char)) {
+      const isActuallyNeeded = Object.values(c.greens).includes(char) || Object.keys(c.yellows).includes(char);
+      if (!isActuallyNeeded) return false;
+    }
+  }
+  // Check yellows
   for (const [yl, inv] of Object.entries(c.yellows)) {
     if (!w.includes(yl)) return false;
     for (let i = 0; i < 5; i++) if (ch[i] === yl && inv.includes(i)) return false;
@@ -350,6 +369,21 @@ export default function AdminSpyMode({ params }: { params: Promise<{ id: string 
   const resetHints = async () => {
     await supabase.from('teams').update({ hints_used: 0, round_hints_used: 0 }).eq('id', team.id);
   };
+  const resetUndos = async () => {
+    const payload = { ...(team.state_payload || {}), undos: 3 };
+    await supabase.from('teams').update({ state_payload: payload }).eq('id', team.id);
+  };
+  const resetWordle = async () => {
+    const cipherWord = team.cipher_word?.toUpperCase() ?? '';
+    const pool = VALID_WORDS.filter(w => w.toUpperCase() !== cipherWord);
+    const newWord = pool[Math.floor(Math.random() * pool.length)].toUpperCase();
+    const payload = { guesses: [], undos: 3, targetWord: newWord };
+    await supabase.from('teams').update({
+      state_payload: payload,
+      current_target: newWord,
+      round_hints_used: 0
+    }).eq('id', team.id);
+  };
   const skipRound = async () => {
     if (team.current_round >= 5) return;
     await supabase.from('teams').update({ current_round: team.current_round + 1, keys_unlocked: Math.max(team.keys_unlocked, team.current_round) }).eq('id', team.id);
@@ -394,15 +428,37 @@ export default function AdminSpyMode({ params }: { params: Promise<{ id: string 
           </div>
         </div>
 
-        {team.current_target && (
-          <div className="px-6 py-3 bg-black/40 border-t border-red-500/20 flex items-center justify-between gap-4">
+        {/* Answer Bar: Show both Master and Round targets */}
+        <div className="bg-black/40 border-t border-white/10 divide-y divide-white/5">
+          {/* Master */}
+          <div className="px-6 py-2.5 flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-              <ShieldCheck size={13} className="text-red-400" />
-              <span className="text-xs uppercase tracking-widest text-gray-500 font-bold">Active Answer</span>
+              <ShieldCheck size={13} className="text-cyan-400" />
+              <span className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Master Answer</span>
             </div>
-            <span className="font-mono text-base text-white bg-red-900/20 border border-red-500/30 px-4 py-1 rounded-lg tracking-widest">{team.current_target}</span>
+            <span className="font-mono text-sm text-cyan-200/80 bg-cyan-900/20 border border-cyan-500/20 px-3 py-0.5 rounded-lg tracking-widest">
+              {team.cipher_word || '—'}
+            </span>
           </div>
-        )}
+
+          {/* Round-specific (prefer state_payload for R3 Wordle) */}
+          {team.current_target && (
+            <div className="px-6 py-2.5 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <ShieldAlert size={13} className="text-red-400" />
+                <span className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">
+                  {team.current_round === 3 ? 'R3: Lethal Word' : 
+                   team.current_round === 2 ? 'R2: Target Char' :
+                   team.current_round === 4 ? 'R4: Password' :
+                   team.current_round === 5 ? 'R5: Escape Code' : 'Round Target'}
+                </span>
+              </div>
+              <span className="font-mono text-sm text-red-200/80 bg-red-900/20 border border-red-500/20 px-3 py-0.5 rounded-lg tracking-widest">
+                {team.current_round === 3 ? (team.state_payload?.targetWord || team.current_target) : team.current_target}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Quick controls */}
@@ -412,6 +468,12 @@ export default function AdminSpyMode({ params }: { params: Promise<{ id: string 
           <button onClick={() => adjustPenalty(-1)} className="flex items-center gap-2 px-4 py-2 bg-green-500/10 hover:bg-green-500/20 border border-green-500/30 text-green-400 rounded-xl text-sm font-bold transition-colors"><Minus size={13} /> -1m Penalty</button>
           <button onClick={() => adjustPenalty(3)} className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 rounded-xl text-sm font-bold transition-colors"><Plus size={13} /> +3m Penalty</button>
           <button onClick={resetHints} className="flex items-center gap-2 px-4 py-2 bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 rounded-xl text-sm font-bold transition-colors"><RotateCcw size={13} /> Reset Hints</button>
+          {team.current_round === 3 && (
+            <>
+              <button onClick={resetUndos} className="flex items-center gap-2 px-4 py-2 bg-green-500/10 hover:bg-green-500/20 border border-green-500/30 text-green-400 rounded-xl text-sm font-bold transition-colors"><RefreshCw size={13} /> Reset Undos</button>
+              <button onClick={() => { if(confirm('Reset Wordle?')) resetWordle(); }} className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 rounded-xl text-sm font-bold transition-colors"><RotateCcw size={13} /> Reset Word</button>
+            </>
+          )}
           {!team.end_time && team.current_round < 5 && (
             <button onClick={skipRound} className="flex items-center gap-2 px-4 py-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 rounded-xl text-sm font-bold transition-colors"><SkipForward size={13} /> Skip → Round {team.current_round + 1}</button>
           )}
