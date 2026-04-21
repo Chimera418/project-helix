@@ -1,11 +1,49 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useGameStore } from '@/lib/store';
+import { subscribeToTeamUpdates } from '@/lib/store';
+import { supabase } from '@/lib/supabase';
 import GlobalTimer from './Timer';
-import { ShieldAlert, Key } from 'lucide-react';
+import { Key } from 'lucide-react';
 
 export default function HUD() {
-  const { team, setTeam } = useGameStore();
+  const { team, setTeam, patchTeamLocally } = useGameStore();
+
+  // On every mount, fetch fresh team data from Supabase and overwrite
+  // the potentially stale localStorage snapshot. This ensures skip-round,
+  // hint-reset, and penalty changes made by admin are reflected immediately
+  // even if the client was offline or hadn't received the realtime event.
+  useEffect(() => {
+    if (!team?.id) return;
+    supabase
+      .from('teams')
+      .select('*')
+      .eq('id', team.id)
+      .single()
+      .then(({ data }) => {
+        if (data) {
+          patchTeamLocally({
+            current_round: data.current_round,
+            keys_unlocked: data.keys_unlocked,
+            hints_used: data.hints_used,
+            round_hints_used: data.round_hints_used,
+            penalty_minutes: data.penalty_minutes,
+            start_time: data.start_time,
+            end_time: data.end_time,
+            current_target: data.current_target,
+            cipher_word: data.cipher_word,
+          });
+        }
+      });
+  }, [team?.id]);
+
+  // Also subscribe for live admin changes going forward
+  useEffect(() => {
+    if (!team?.id) return;
+    const unsub = subscribeToTeamUpdates(team.id);
+    return unsub;
+  }, [team?.id]);
 
   if (!team) return null; // Don't show HUD on login panel
 

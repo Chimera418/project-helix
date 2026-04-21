@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ShieldAlert, Users, Trophy, Timer, Key, SkipForward,
   Minus, Plus, RotateCcw, Eye, LogOut, RefreshCw,
-  Zap, AlertTriangle, CheckCircle2, Medal
+  Zap, AlertTriangle, CheckCircle2, Clock, X
 } from 'lucide-react';
 import { useGameStore } from '@/lib/store';
 import Link from 'next/link';
@@ -51,6 +51,108 @@ function LiveTimer({ team, timerDuration }: { team: Team; timerDuration: number 
   return <span className="font-mono text-sm">{display}</span>;
 }
 
+// ─── Edit Timing Modal ───────────────────────────────────────────────────────
+function toLocalInput(iso: string | null): string {
+  if (!iso) return '';
+  // datetime-local needs 'YYYY-MM-DDTHH:mm'
+  return iso.slice(0, 16);
+}
+function fromLocalInput(val: string): string {
+  // Convert local datetime-local value back to ISO string (treat as local time)
+  return val ? new Date(val).toISOString() : '';
+}
+
+function EditTimingModal({ team, onClose }: { team: Team; onClose: () => void }) {
+  const [startVal, setStartVal] = useState(toLocalInput(team.start_time));
+  const [endVal, setEndVal] = useState(toLocalInput(team.end_time));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    const patch: Partial<Team> = {
+      start_time: startVal ? fromLocalInput(startVal) : null,
+      end_time: endVal ? fromLocalInput(endVal) : null,
+    };
+    await supabase.from('teams').update(patch).eq('id', team.id);
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => { setSaved(false); onClose(); }, 800);
+  };
+
+  const handleClearEnd = async () => {
+    setSaving(true);
+    await supabase.from('teams').update({ end_time: null }).eq('id', team.id);
+    setSaving(false);
+    setEndVal('');
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[999] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
+        onClick={e => e.stopPropagation()}
+        className="relative glass rounded-2xl border border-orange-500/30 w-full max-w-md p-6 shadow-[0_0_60px_rgba(251,146,60,0.15)]"
+      >
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-2">
+            <Clock size={16} className="text-orange-400" />
+            <h3 className="font-mono font-bold text-orange-400 uppercase tracking-widest text-sm">Adjust Timing</h3>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-white"><X size={16} /></button>
+        </div>
+        <p className="text-xs font-mono text-gray-500 mb-5 uppercase tracking-widest">{team.name}</p>
+
+        <div className="flex flex-col gap-4">
+          <div>
+            <label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold block mb-1">Start Time</label>
+            <input
+              type="datetime-local"
+              value={startVal}
+              onChange={e => setStartVal(e.target.value)}
+              className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-orange-400 transition-colors"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold block mb-1">End Time (leave blank if still active)</label>
+            <input
+              type="datetime-local"
+              value={endVal}
+              onChange={e => setEndVal(e.target.value)}
+              className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-orange-400 transition-colors"
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-2 mt-6">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/40 text-orange-400 font-bold py-2 rounded-lg text-sm uppercase tracking-widest transition-colors disabled:opacity-50"
+          >
+            {saved ? '✓ Saved' : saving ? 'Saving…' : 'Save'}
+          </button>
+          {team.end_time && (
+            <button
+              onClick={handleClearEnd}
+              disabled={saving}
+              className="px-4 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 font-bold py-2 rounded-lg text-xs uppercase tracking-widest transition-colors disabled:opacity-50"
+              title="Mark team as still active (removes end_time)"
+            >
+              Reopen
+            </button>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function TeamCard({
   t,
   timerDuration,
@@ -65,6 +167,7 @@ function TeamCard({
   onSkip: (t: Team) => void;
 }) {
   const [custom, setCustom] = useState('');
+  const [showTimingModal, setShowTimingModal] = useState(false);
   const isEscaped = !!t.end_time;
   const roundInfo = ROUND_NAMES[t.current_round] ?? ROUND_NAMES[1];
 
@@ -214,8 +317,23 @@ function TeamCard({
               <SkipForward size={11} /> Skip Round
             </button>
           )}
+          {/* ── Timing Adjustment (always visible) ── */}
+          <button
+            onClick={() => setShowTimingModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500/10 hover:bg-orange-500/25 border border-orange-500/30 text-orange-400 rounded-lg text-xs font-bold transition-colors"
+            title="Adjust start/end times"
+          >
+            <Clock size={11} /> Adjust Time
+          </button>
         </div>
       </div>
+
+      {/* Timing Modal */}
+      <AnimatePresence>
+        {showTimingModal && (
+          <EditTimingModal team={t} onClose={() => setShowTimingModal(false)} />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

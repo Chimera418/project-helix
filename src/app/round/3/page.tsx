@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useGameStore } from '@/lib/store';
 import { useRouter } from 'next/navigation';
 import HintButton from '@/components/ui/HintButton';
-import { VALID_WORDS, getRandomTarget } from '@/data/words';
+import { VALID_WORDS } from '@/data/words';
 import { Skull, AlertTriangle, ShieldCheck, List } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -40,16 +40,28 @@ export default function Round3() {
   const [wordListVisible, setWordListVisible] = useState(false);
   const [wordSearch, setWordSearch] = useState('');
 
-  // Single init: set target word — current_round is set in the combined sync below
+  // Single init: restore or pick target word
   useEffect(() => {
     if (!team) {
       router.replace('/');
       return;
     }
-    // Pick a random target that is NEVER the cipher word for this team
+    // If this team already has a persisted wordle target, restore it.
+    // This prevents the word from changing on every refresh.
+    const saved = (team.state_payload?.targetWord as string | undefined);
+    if (saved && saved.length === 5) {
+      setTargetWord(saved.toUpperCase());
+      // Also restore their guesses so progress isn't lost
+      const savedGuesses = team.state_payload?.guesses;
+      if (Array.isArray(savedGuesses) && savedGuesses.length > 0) {
+        setGuesses(savedGuesses);
+      }
+      return;
+    }
+    // First time on this round: pick a random target that is NEVER the cipher word
     const cipherWord = team.cipher_word?.toUpperCase() ?? '';
     const pool = VALID_WORDS.filter(w => w.toUpperCase() !== cipherWord);
-    setTargetWord(pool[Math.floor(Math.random() * pool.length)]);
+    setTargetWord(pool[Math.floor(Math.random() * pool.length)].toUpperCase());
   }, []);
 
   // Combined sync: always writes current_round: 3 + target + payload in one atomic update
@@ -220,9 +232,20 @@ export default function Round3() {
   };
 
   const restartWithPenalty = () => {
-    // Penalty logic for losing
-    if(team) setTeam({ ...team, penalty_minutes: (team.penalty_minutes || 0) + 3 });
-    setTargetWord(getRandomTarget());
+    // Penalty + hint reset on retry
+    const cipherWord = team?.cipher_word?.toUpperCase() ?? '';
+    const pool = VALID_WORDS.filter(w => w.toUpperCase() !== cipherWord);
+    const newWord = pool[Math.floor(Math.random() * pool.length)].toUpperCase();
+    if (team) {
+      setTeam({
+        ...team,
+        penalty_minutes: (team.penalty_minutes || 0) + 3,
+        round_hints_used: 0,        // reset hints so they reflect the new word
+        state_payload: { guesses: [], undos: 3, targetWord: newWord },
+        current_target: newWord,
+      });
+    }
+    setTargetWord(newWord);
     setGuesses([]);
     setCurrentGuess('');
     setGameState('playing');
