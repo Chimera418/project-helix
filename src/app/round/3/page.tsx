@@ -64,7 +64,7 @@ export default function Round3() {
     } 
     
     // Case 2: New Game Generation (Only if DB is empty after sync)
-    if (!targetWord && team.current_round === 3 && !isSyncing && !dbTarget) {
+    if (team && !targetWord && !isSyncing && !dbTarget) {
       // Pick a new word only if NOTHING exists in DB after the isSyncing delay
       const cipherWord = team.cipher_word?.toUpperCase() ?? '';
       const pool = VALID_WORDS.filter(w => w.toUpperCase() !== cipherWord);
